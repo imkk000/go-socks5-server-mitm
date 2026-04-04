@@ -14,24 +14,20 @@ func NewDialFn(dial proxy.Dialer) DialFn {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		logger := log.With().Str("addr", addr).Logger()
 
-		host, _, _ := net.SplitHostPort(addr)
+		host, port, _ := net.SplitHostPort(addr)
 		if host == blockIP.String() {
 			return net.Dial(network, addr)
 		}
-
-		// mu.RLock()
-		// defer mu.RLocker().Unlock()
-		// if _, found := proxyMapIP[host]; found {
-		// 	logger.Info().Msg("proxy dial")
-		// 	return dial.Dial(network, addr)
-		// }
-		// if ip, found := proxyMapDomain[host]; found {
-		// 	logger.Info().Msg("proxy dial")
-		// 	return dial.Dial(network, ip)
-		// }
+		if isProxy(host) {
+			if port == "443" {
+				logger.Info().Msg("dial proxy (tls)")
+				return net.Dial(network, tlsServer)
+			}
+			logger.Info().Msg("dial proxy")
+			return dial.Dial(network, addr)
+		}
 
 		logger.Info().Msg("dial")
-		return net.Dial(network, "127.0.0.1:8080")
-		// return net.Dial(network, addr)
+		return net.Dial(network, addr)
 	}
 }

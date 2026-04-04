@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
-	"sync"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -16,8 +15,9 @@ import (
 )
 
 const (
+	// dnsServer      = "9.9.9.9:853"
 	addr           = "127.0.0.1:8000"
-	dnsServer      = "127.0.0.1:9059"
+	dnsServer      = "https://dns.quad9.net/dns-query"
 	proxyServer    = "127.0.0.1:9050"
 	tlsServer      = "127.0.0.1:8080"
 	configFilename = "config.txt"
@@ -95,7 +95,7 @@ func main() {
 	}()
 
 	server := socks5.NewServer(
-		socks5.WithResolver(new(DNSResolver)),
+		socks5.WithResolver(NewDNSResolver(dial)),
 		socks5.WithDial(NewDialFn(dial)),
 	)
 
@@ -103,8 +103,6 @@ func main() {
 		log.Fatal().Err(err).Msg("listen server")
 	}
 }
-
-var mu = new(sync.RWMutex)
 
 func setCORS(header http.Header) {
 	header.Set("Access-Control-Allow-Origin", "*")
