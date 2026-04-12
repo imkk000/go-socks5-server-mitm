@@ -1,8 +1,9 @@
 package main
 
 import (
-	"fmt"
+	"bufio"
 	"os"
+	"strings"
 )
 
 func readConfig(filename string) ([]DomainConfig, error) {
@@ -13,22 +14,29 @@ func readConfig(filename string) ([]DomainConfig, error) {
 	defer fs.Close()
 
 	var cfg []DomainConfig
-	var status string
-	var domain string
+	r := bufio.NewReader(fs)
 	for {
-		if _, err := fmt.Fscanln(fs, &status, &domain); err != nil {
+		raw, _, err := r.ReadLine()
+		if err != nil {
 			break
 		}
-		cfg = append(cfg, DomainConfig{
-			Status: status,
-			Domain: domain,
-		})
+		line := strings.TrimSpace(string(raw))
+		ss := strings.Split(line, " ")
+		dc := DomainConfig{
+			Action: ss[0],
+			Domain: ss[1],
+		}
+		if len(ss) >= 3 {
+			dc.Extra = strings.Join(ss[2:], " ")
+		}
+		cfg = append(cfg, dc)
 	}
 
 	return cfg, nil
 }
 
 type DomainConfig struct {
-	Status string
+	Action string
 	Domain string
+	Extra  string
 }

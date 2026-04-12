@@ -13,7 +13,10 @@ import (
 )
 
 func generateCert(domain string, caKeyPair tls.Certificate, caX509 *x509.Certificate) (*tls.Certificate, error) {
-	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject:      pkix.Name{CommonName: domain},
@@ -21,15 +24,16 @@ func generateCert(domain string, caKeyPair tls.Certificate, caX509 *x509.Certifi
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(24 * time.Hour),
 	}
-	certDER, _ := x509.CreateCertificate(rand.Reader, template, caX509, &priv.PublicKey, caKeyPair.PrivateKey)
+	certDER, err := x509.CreateCertificate(rand.Reader, template, caX509, &priv.PublicKey, caKeyPair.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
 
 	return &tls.Certificate{
 		Certificate: [][]byte{certDER},
 		PrivateKey:  priv,
 	}, nil
 }
-
-var certCache sync.Map
 
 func getCert(domain string, caKeyPair tls.Certificate, caX509 *x509.Certificate) *tls.Certificate {
 	if v, ok := certCache.Load(domain); ok {
@@ -45,4 +49,5 @@ var (
 	caKeyPEM, _  = os.ReadFile("./cert/rootCA-key.pem")
 	caKeyPair, _ = tls.X509KeyPair(caCertPEM, caKeyPEM)
 	caX509, _    = x509.ParseCertificate(caKeyPair.Certificate[0])
+	certCache    = new(sync.Map)
 )

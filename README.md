@@ -8,6 +8,8 @@ Migrate from `dns over https` query into full socks5 proxy with block some websi
 
 From this design I can block some request and decrypt request between victim and request server to inject something then response to victim.
 I will generate certificate with local root CA automatically when cert is not exists into cache.
+I custom `go-socks5` library to hook state after client handshake socks5 success and got reply success.
+Check request if client send `0x16` means https hello request so direct to mitm https server.
 
 ### Steps
 

@@ -1,11 +1,7 @@
 package main
 
 import (
-	"context"
-	"crypto/tls"
-	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -15,13 +11,17 @@ import (
 )
 
 const (
-	// dnsServer      = "9.9.9.9:853"
 	addr           = "127.0.0.1:8000"
-	dnsServer      = "https://dns.quad9.net/dns-query"
 	proxyServer    = "127.0.0.1:9050"
-	tlsServer      = "127.0.0.1:8080"
+	tlsServer      = "127.0.0.1:54909"
 	configFilename = "config.txt"
 )
+
+var dnsServers = []string{
+	"https://dns.quad9.net/dns-query",
+	"https://all.dns.mullvad.net/dns-query",
+	"https://security.cloudflare-dns.com/dns-query",
+}
 
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{
@@ -34,11 +34,14 @@ func main() {
 		log.Fatal().Err(err).Msg("read config")
 	}
 	for _, cfg := range config {
-		switch cfg.Status {
+		// TODO: case "c": custom dns
+		switch cfg.Action {
+		case "s":
+			skipProxy.Insert(cfg.Domain)
 		case "b":
-			blockList[cfg.Domain] = struct{}{}
+			blockList.Insert(cfg.Domain)
 		case "p":
-			proxyList[cfg.Domain] = struct{}{}
+			proxyList.Insert(cfg.Domain, cfg.Extra)
 		default:
 		}
 	}
@@ -47,56 +50,13 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("connect to proxy server")
 	}
-
-	go func() {
-		tlsConfig := &tls.Config{
-			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				domain := hello.ServerName
-				return getCert(domain, caKeyPair, caX509), nil
-			},
-		}
-
-		proxy := &httputil.ReverseProxy{
-			Director: func(r *http.Request) {
-				r.URL.Scheme = "https"
-				if r.URL.Host == "" {
-					r.URL.Host = r.Host
-				}
-			},
-			ModifyResponse: func(resp *http.Response) error {
-				setCORS(resp.Header)
-				return nil
-			},
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-					// call socks5 proxy (torsocks)
-					return dial.Dial(network, addr)
-				},
-			},
-		}
-
-		mux := http.NewServeMux()
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodOptions {
-				setCORS(w.Header())
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-			proxy.ServeHTTP(w, r)
-		})
-
-		listener, err := tls.Listen("tcp", tlsServer, tlsConfig)
-		if err != nil {
-			log.Fatal().Err(err).Msg("listen tls server")
-		}
-		if err := http.Serve(listener, mux); err != nil {
-			log.Fatal().Err(err).Msg("start https proxy")
-		}
-	}()
+	dialer := dial.(proxy.ContextDialer)
+	go startMITMServer(dialer)
 
 	server := socks5.NewServer(
-		socks5.WithResolver(NewDNSResolver(dial)),
-		socks5.WithDial(NewDialFn(dial)),
+		socks5.WithResolver(NewDNSResolver(dialer)),
+		socks5.WithDial(NewDialFn(dialer)),
+		socks5.WithHookReplySuccess(NewHookReplySuccess(dialer)),
 	)
 
 	if err := server.ListenAndServe("tcp", addr); err != nil {

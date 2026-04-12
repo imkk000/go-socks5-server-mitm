@@ -3,10 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -19,11 +19,11 @@ type DNSResolver struct {
 	client *http.Client
 }
 
-func NewDNSResolver(dial proxy.Dialer) *DNSResolver {
+func NewDNSResolver(dial proxy.ContextDialer) *DNSResolver {
 	client := &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dial.Dial(network, addr)
+				return dial.DialContext(ctx, network, addr)
 			},
 			ForceAttemptHTTP2: true,
 		},
@@ -36,19 +36,17 @@ func (d *DNSResolver) Resolve(ctx context.Context, name string) (context.Context
 
 	if isBlock(name) {
 		logger.Info().Msg("blocked")
-		return ctx, blockIP, nil
+		return ctx, net.IPv4zero, nil
 	}
 
 	// cache
-	dnsMemMutex.RLock()
-	if c, hit := dnsMemCache[name]; hit {
+	if val, hit := dnsMemCache.Load(name); hit {
+		c := val.(DNSCache)
 		if time.Until(c.Expiry).Seconds() > 0 {
-			defer dnsMemMutex.RUnlock()
 			logger.Info().Msg("hit cache")
 			return ctx, c.IP, nil
 		}
 	}
-	dnsMemMutex.RUnlock()
 
 	msg := new(dns.Msg)
 	msg.SetQuestion(name+".", dns.TypeA)
@@ -56,13 +54,7 @@ func (d *DNSResolver) Resolve(ctx context.Context, name string) (context.Context
 	if err != nil {
 		return ctx, nil, err
 	}
-	req, err := http.NewRequest(http.MethodPost, dnsServer, bytes.NewReader(wire))
-	if err != nil {
-		return ctx, nil, err
-	}
-	req.Header.Set("Content-Type", "application/dns-message")
-	req.Header.Set("Accept", "application/dns-message")
-	httpResp, err := d.client.Do(req)
+	httpResp, err := d.doRequest(ctx, wire)
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -79,17 +71,12 @@ func (d *DNSResolver) Resolve(ctx context.Context, name string) (context.Context
 		if a, ok := answer.(*dns.A); ok {
 			logger.Info().Msg("exchanged")
 
-			dnsMemMutex.Lock()
-			dnsMemCache[name] = DNSCache{
+			dnsMemCache.Store(name, DNSCache{
 				IP:     a.A,
 				Expiry: time.Now().Add(time.Duration(a.Hdr.Ttl) * time.Second),
-			}
-			dnsMemMutex.Unlock()
-
+			})
 			if isProxy(name) {
-				proxyMutex.Lock()
-				proxyMapIP[a.A.String()] = name
-				proxyMutex.Unlock()
+				proxyMapIP.Store(a.A.String(), name)
 			}
 
 			return ctx, a.A, nil
@@ -99,9 +86,28 @@ func (d *DNSResolver) Resolve(ctx context.Context, name string) (context.Context
 	return ctx, nil, nil
 }
 
+func (d *DNSResolver) doRequest(ctx context.Context, rawMsg []byte) (*http.Response, error) {
+	for _, server := range dnsServers {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, server, bytes.NewReader(rawMsg))
+		if err != nil {
+			continue
+		}
+		req.ContentLength = int64(len(rawMsg))
+		req.Header.Set("Content-Type", "application/dns-message")
+		req.Header.Set("Accept", "application/dns-message")
+		resp, err := d.client.Do(req)
+		if err != nil {
+			continue
+		}
+		return resp, nil
+	}
+
+	return nil, errors.New("all upstream servers failed")
+}
+
 var (
-	dnsMemMutex = new(sync.RWMutex)
-	dnsMemCache = make(map[string]DNSCache)
+	dnsMemCache = new(sync.Map)
+	dnsTLSCache = new(sync.Map)
 )
 
 type DNSCache struct {
@@ -109,45 +115,28 @@ type DNSCache struct {
 	Expiry time.Time
 }
 
-var (
-	blockIP   = net.ParseIP("0.0.0.0")
-	blockList = make(map[string]struct{})
-)
+var blockList = NewTrie()
 
 func isBlock(name string) bool {
-	if _, found := blockList[name]; found {
-		return true
-	}
-	for domain := range blockList {
-		if strings.HasSuffix(name, domain) {
-			return true
-		}
-	}
-	return false
+	return blockList.Match(name)
 }
 
 var (
-	proxyMutex = new(sync.RWMutex)
-	proxyList  = make(map[string]struct{})
-	proxyMapIP = make(map[string]string)
+	// TODO: evict
+	proxyMapIP = new(sync.Map)
+	proxyList  = NewTrie()
 )
 
 func isProxy(name string) bool {
-	proxyMutex.RLock()
-	// map ip into hostname
-	host, found := proxyMapIP[name]
+	val, found := proxyMapIP.Load(name)
 	if found {
-		name = host
+		name = val.(string)
 	}
-	proxyMutex.RUnlock()
+	return proxyList.Match(name)
+}
 
-	if _, found := proxyList[name]; found {
-		return true
-	}
-	for domain := range proxyList {
-		if strings.HasSuffix(name, domain) {
-			return true
-		}
-	}
-	return false
+var skipProxy = NewTrie()
+
+func isSkipProxy(name string) bool {
+	return skipProxy.Match(name)
 }
