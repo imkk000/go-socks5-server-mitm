@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	github.com/miekg/dns v1.1.72
 	github.com/rs/zerolog v1.35.0
-	github.com/things-go/go-socks5 v0.0.0-00010101000000-000000000000
+	github.com/things-go/go-socks5 v0.0.0-20260412185445-80f855dd35d3
 	golang.org/x/net v0.52.0
 )
 
@@ -18,4 +18,4 @@ require (
 	golang.org/x/tools v0.40.0 // indirect
 )
 
-replace github.com/things-go/go-socks5 => github.com/imkk000/go-socks5 v0.0.0-20260412153100-996a7fd4e66a
+replace github.com/things-go/go-socks5 => github.com/imkk000/go-socks5 v0.0.0-20260412185445-80f855dd35d3

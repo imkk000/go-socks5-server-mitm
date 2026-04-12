@@ -75,9 +75,7 @@ func (d *DNSResolver) Resolve(ctx context.Context, name string) (context.Context
 				IP:     a.A,
 				Expiry: time.Now().Add(time.Duration(a.Hdr.Ttl) * time.Second),
 			})
-			if isProxy(name) {
-				proxyMapIP.Store(a.A.String(), name)
-			}
+			proxyMapIP.Store(a.A.String(), name)
 
 			return ctx, a.A, nil
 		}

@@ -13,7 +13,7 @@ import (
 const (
 	addr           = "127.0.0.1:8000"
 	proxyServer    = "127.0.0.1:9050"
-	tlsServer      = "127.0.0.1:54909"
+	httpServer     = "/tmp/socks5-tls.sock"
 	configFilename = "config.txt"
 )
 
@@ -24,6 +24,8 @@ var dnsServers = []string{
 }
 
 func main() {
+	os.Remove(httpServer)
+
 	log.Logger = log.Output(zerolog.ConsoleWriter{
 		Out:             os.Stdout,
 		FormatTimestamp: func(any) string { return "" },
@@ -55,8 +57,8 @@ func main() {
 
 	server := socks5.NewServer(
 		socks5.WithResolver(NewDNSResolver(dialer)),
-		socks5.WithDial(NewDialFn(dialer)),
-		socks5.WithHookReplySuccess(NewHookReplySuccess(dialer)),
+		socks5.WithDial(NewDialFn()),
+		socks5.WithHookReplySuccess(NewHookReplySuccess()),
 	)
 
 	if err := server.ListenAndServe("tcp", addr); err != nil {
