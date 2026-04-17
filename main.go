@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/http"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -11,7 +10,8 @@ import (
 )
 
 const (
-	addr           = "127.0.0.1:8000"
+	addr           = "127.0.0.1:8001"
+	proxyServerDNS = "127.0.0.1:9050"
 	proxyServer    = "127.0.0.1:9050"
 	httpServer     = "/tmp/socks5-tls.sock"
 	configFilename = "config.txt"
@@ -48,15 +48,22 @@ func main() {
 		}
 	}
 
-	dial, err := proxy.SOCKS5("tcp", proxyServer, nil, proxy.Direct)
+	exitDial, err := proxy.SOCKS5("tcp", proxyServer, nil, proxy.Direct)
 	if err != nil {
 		log.Fatal().Err(err).Msg("connect to proxy server")
 	}
-	dialer := dial.(proxy.ContextDialer)
+	dialer := exitDial.(proxy.ContextDialer)
+
+	dialDNS, err := proxy.SOCKS5("tcp", proxyServerDNS, nil, proxy.Direct)
+	if err != nil {
+		log.Fatal().Err(err).Msg("connect to dns proxy server")
+	}
+	dialerDNS := dialDNS.(proxy.ContextDialer)
+
 	go startMITMServer(dialer)
 
 	server := socks5.NewServer(
-		socks5.WithResolver(NewDNSResolver(dialer)),
+		socks5.WithResolver(NewDNSResolver(dialerDNS)),
 		socks5.WithDial(NewDialFn()),
 		socks5.WithHookReplySuccess(NewHookReplySuccess()),
 	)
@@ -64,12 +71,4 @@ func main() {
 	if err := server.ListenAndServe("tcp", addr); err != nil {
 		log.Fatal().Err(err).Msg("listen server")
 	}
-}
-
-func setCORS(header http.Header) {
-	header.Set("Access-Control-Allow-Origin", "*")
-	header.Set("Access-Control-Allow-Headers", "*")
-	header.Set("Access-Control-Allow-Methods", "*")
-	header.Set("Access-Control-Expose-Headers", "*")
-	header.Set("Access-Control-Allow-Credentials", "true")
 }

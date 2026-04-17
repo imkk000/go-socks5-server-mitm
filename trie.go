@@ -1,6 +1,8 @@
 package main
 
-import "strings"
+import (
+	"strings"
+)
 
 type Trie struct {
 	children map[string]*Trie
@@ -44,17 +46,24 @@ func (t *Trie) Match(domain string) bool {
 }
 
 func (t *Trie) MatchEx(domain string) (string, bool) {
+	var extra string
 	parts := strings.Split(domain, ".")
 	node := t
 	for i := len(parts) - 1; i >= 0; i-- {
 		if node.matched {
-			return t.extra, true
+			return node.extra, true
 		}
 		next, ok := node.children[parts[i]]
 		if !ok {
-			return t.extra, false
+			return node.extra, false
+		}
+		if next.extra != "" {
+			extra = next.extra
 		}
 		node = next
 	}
-	return t.extra, node.matched
+	if node.extra != "" {
+		extra = node.extra
+	}
+	return extra, node.matched
 }
