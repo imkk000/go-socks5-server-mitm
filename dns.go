@@ -32,6 +32,8 @@ func NewDNSResolver(dial proxy.ContextDialer) *DNSResolver {
 }
 
 func (d *DNSResolver) Resolve(ctx context.Context, name string) (context.Context, net.IP, error) {
+	// TODO: resolve to localhost all cases no blocked
+	// using doh server int localhost
 	logger := log.With().Str("query", name).Logger()
 
 	if isBlock(name) {

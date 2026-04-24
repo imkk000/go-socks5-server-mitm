@@ -18,18 +18,12 @@ import (
 func startMITMServer(dialer proxy.ContextDialer) {
 	rp := &httputil.ReverseProxy{
 		Director: func(r *http.Request) {
-			var body []byte
-			if r.Body != nil {
-				ibody, _ := io.ReadAll(r.Body)
-				r.Body = io.NopCloser(bytes.NewReader(ibody))
-				body = ibody
-			}
-
 			log.Info().
+				Str("host", r.Host).
 				Str("method", r.Method).
 				Str("path", r.URL.Path).
-				Str("body", string(body)).
 				Msg("peek")
+
 			r.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0")
 		},
 		ModifyResponse: func(r *http.Response) error {
@@ -81,7 +75,7 @@ func startMITMServer(dialer proxy.ContextDialer) {
 			if isTLS {
 				tlsConn := tls.Server(conn, &tls.Config{
 					GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-						return generateCert(hello.ServerName, caKeyPair, caX509)
+						return getCert(hello.ServerName, caKeyPair, caX509)
 					},
 				})
 				if err := tlsConn.Handshake(); err != nil {

@@ -12,6 +12,18 @@ import (
 	"time"
 )
 
+func getCert(domain string, caKeyPair tls.Certificate, caX509 *x509.Certificate) (*tls.Certificate, error) {
+	if v, ok := certCache.Load(domain); ok {
+		return v.(*tls.Certificate), nil
+	}
+	cert, err := generateCert(domain, caKeyPair, caX509)
+	if err != nil {
+		return nil, err
+	}
+	certCache.Store(domain, cert)
+	return cert, nil
+}
+
 func generateCert(domain string, caKeyPair tls.Certificate, caX509 *x509.Certificate) (*tls.Certificate, error) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -33,15 +45,6 @@ func generateCert(domain string, caKeyPair tls.Certificate, caX509 *x509.Certifi
 		Certificate: [][]byte{certDER},
 		PrivateKey:  priv,
 	}, nil
-}
-
-func getCert(domain string, caKeyPair tls.Certificate, caX509 *x509.Certificate) *tls.Certificate {
-	if v, ok := certCache.Load(domain); ok {
-		return v.(*tls.Certificate)
-	}
-	cert, _ := generateCert(domain, caKeyPair, caX509)
-	certCache.Store(domain, cert)
-	return cert
 }
 
 var (
