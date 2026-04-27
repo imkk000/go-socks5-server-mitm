@@ -23,13 +23,22 @@ SOCKS5 Proxy :8001
                     ├── Peek first byte (0x16 = TLS ClientHello)
                     ├── TLS: generate cert on-the-fly for SNI domain
                     │         (signed by local root CA via mkcert fork)
+                    ├── Detect browser type (Firefox / Chrome) from UA
                     └── Reverse proxy to real upstream
                               ├── Direct or via Tor SOCKS5
-                              ├── Log method / path / body
+                              ├── uTLS outbound with matching JA3 fingerprint
+                              ├── HTTP/1.1 + HTTP/2 transport
+                              ├── WebSocket upgrade passthrough (WS/WSS)
+                              ├── Patch User-Agent to match browser fingerprint
+                              ├── Log scheme / host / method / path / browser
                               └── Optionally inject CORS headers
 ```
 
 After the SOCKS5 handshake succeeds, the custom `go-socks5` fork hooks into the reply-success state and redirects all non-blocked, non-skipped connections to the local MITM server over a Unix socket instead of dialing the real destination directly.
+
+The MITM server detects the browser type (Firefox or Chrome) from the incoming `User-Agent` header and uses that to:
+1. Apply a matching **uTLS `ClientHelloID`** (`HelloFirefox_Auto` / `HelloChrome_Auto`) for outbound TLS — so the JA3 fingerprint matches the real browser.
+2. Patch the forwarded `User-Agent` to a consistent value for that browser family, and strip `Sec-Ch-Ua-*` headers when impersonating Chrome.
 
 ## Companion Projects
 
@@ -72,6 +81,25 @@ DNS is resolved inside the proxy using **DNS-over-HTTPS (DoH)** tunnelled throug
 - `https://all.dns.mullvad.net/dns-query`
 - `https://security.cloudflare-dns.com/dns-query`
 
+## JA3 / TLS Fingerprinting
+
+Outbound TLS connections use [refraction-networking/utls](https://github.com/refraction-networking/utls) instead of the standard `crypto/tls`. The `ClientHello` is constructed to match the actual browser making the request:
+
+| Browser detected | uTLS ClientHelloID |
+|---|---|
+| Firefox | `HelloFirefox_Auto` |
+| Chrome | `HelloChrome_Auto` |
+| Unknown | `HelloChrome_Auto` (fallback) |
+
+Both HTTP/1.1 and HTTP/2 transports share the same `DialTLSContext`, so the fingerprint is applied consistently regardless of protocol negotiation.
+
+## WebSocket Proxying
+
+WebSocket upgrade requests (`Upgrade: websocket`) are detected before the reverse proxy handles them. The MITM server:
+1. Accepts the WebSocket handshake from the browser via [coder/websocket](https://github.com/coder/websocket).
+2. Dials the upstream as `ws://` or `wss://` (scheme derived from whether the inbound was TLS).
+3. Bidirectionally copies frames between the two connections until either side closes.
+
 ## Certificate Generation
 
 When an HTTPS connection arrives at the MITM server, the TLS `ClientHello` SNI is used to generate a certificate for that exact domain, signed by the local root CA. Generated certs are cached in memory to avoid regenerating on repeated visits. The browser trusts these certs because the root CA is installed as a trusted authority and HPKP is patched out.
@@ -106,7 +134,9 @@ The SOCKS5 proxy listens on `127.0.0.1:8001`. Point your browser's SOCKS5 proxy 
 
 ## Dependencies
 
-- [things-go/go-socks5](https://github.com/things-go/go-socks5) (replaced by the fork above via `go.mod`)
+- [imkk000/go-socks5](https://github.com/imkk000/go-socks5) (fork replacing `things-go/go-socks5` via `go.mod`)
 - [miekg/dns](https://github.com/miekg/dns) — DNS message parsing for DoH
 - [rs/zerolog](https://github.com/rs/zerolog) — structured logging
-- [golang.org/x/net/proxy](https://pkg.go.dev/golang.org/x/net/proxy) — SOCKS5 dialer for upstream Tor
+- [golang.org/x/net](https://pkg.go.dev/golang.org/x/net) — SOCKS5 dialer and HTTP/2 transport
+- [refraction-networking/utls](https://github.com/refraction-networking/utls) — uTLS for JA3 browser fingerprint matching
+- [coder/websocket](https://github.com/coder/websocket) — WebSocket upgrade and bidirectional proxy
